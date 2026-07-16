@@ -129,6 +129,39 @@ Tools exposed: `trace_search`, `trace_get`, `replay_run`, `analyze_failure`,
 JSON-RPC error), so the host can reason about retry. See
 [`docs/research/mcp.md`](docs/research/mcp.md) §9 for the design.
 
+## Instrument an MCP client (record agent→server traffic)
+
+The other half of the MCP story is *observing* MCP-using agents. Every MCP
+interaction (`tools/call`, `resources/read`, `prompts/get`, `tools/list`) is
+funneled through the SDK's replayable `call_external` rail as `kind="mcp"`, so
+recorded MCP traffic is replayable, counterfactual-ready, and analyzable like
+any tool — no core changes. Dependency-free recorder for any client/SDK:
+
+```python
+from agentcrash.sdk import CrashTracer
+from agentcrash.integrations.mcp_client import MCPClientRecorder
+
+tracer = CrashTracer(integration="my-agent", framework="my-framework")
+with tracer.run("agent", model="gpt-4o") as run:
+    rec = MCPClientRecorder(run, server="billing")
+    result = rec.call_tool("search", {"q": "john"},
+                           lambda: my_mcp_client.call_tool("search", {"q": "john"}))
+```
+
+Or auto-record a Python `mcp.ClientSession` (install with `pip install
+'agentcrash[mcp]'`):
+
+```python
+from agentcrash.integrations.mcp_client import RecordingClientSession
+session = RecordingClientSession(my_mcp_client_session, run, server="billing")
+# session.call_tool / read_resource / get_prompt / list_tools now record into `run`
+```
+
+MCP error channels are preserved: an `isError: true` result is a *returned
+value* (replayed verbatim, not raised); JSON-RPC/transport errors raise and are
+re-raised on replay. Tool args are redacted before storage (secrets in
+`call_signature` too).
+
 ## Replay & counterfactuals
 
 ```python
@@ -212,7 +245,8 @@ research (see `docs/research/integrations.md`):
 - **OpenTelemetry** — ingest OTel GenAI spans via a compatibility adapter
 - **MCP** ✅ — AgentCrash runs *as* a stdio MCP server (`agentcrash mcp`):
   `trace_search`, `trace_get`, `replay_run`, `analyze_failure`,
-  `test_generate`. Client-side instrumentation of MCP traffic is on the roadmap.
+  `test_generate`. Client-side instrumentation (`agentcrash/integrations/mcp_client.py`)
+  records agent→server MCP traffic into the canonical schema, replayable as-is.
 - **OpenAI Agents SDK, Anthropic Claude Agent SDK, LangGraph, PydanticAI,
   smolagents** — via each framework's callback/hook surface
 - **Claude Code, Codex CLI, Aider, OpenHands** — coding-agent actions via
@@ -230,8 +264,8 @@ analyze → test) is real and tested. In progress:
 - **Phase 0** ✅ Ecosystem + architecture research (`docs/research/`)
 - **Phase 1** ✅ Schema, storage, SDK, collector, redaction, server, CLI
 - **Phase 2** ✅ First vertical slice + demo + web UI
-- **Phase 3** 🚧 Universal integration layer — MCP server ✅ shipped; generic
-  SDKs, OTel ingestion, and MCP client-side instrumentation next
+- **Phase 3** 🚧 Universal integration layer — MCP server ✅ + MCP client-side
+  instrumentation ✅ shipped; generic SDKs and OTel ingestion next
 - **Phase 4** 🚧 Major framework + coding-agent integrations
 - **Phase 5** 🚧 Causal analysis v2 (multi-intervention, ranking)
 - **Phase 6** ⏳ Regression test suite + CI runner

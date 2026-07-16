@@ -134,6 +134,15 @@ def redact_event(event: AgentCrashEvent) -> AgentCrashEvent:
         red, t = _walk(val)
         setattr(event, attr, red)
         found.extend(t)
+    # ReplayMeta.call_signature carries the raw call args (e.g. MCP tool
+    # arguments) and is persisted alongside input/output — redact it too, or
+    # secrets in args leak past the input/output scrub. ReplayMeta is frozen,
+    # so rebuild it with the redacted signature.
+    if event.replay is not None and event.replay.call_signature is not None:
+        red_sig, t = _walk(event.replay.call_signature)
+        if t:
+            event.replay = event.replay.model_copy(update={"call_signature": red_sig})
+            found.extend(t)
     if event.error is not None:
         for attr in ("message", "stack"):
             val = getattr(event.error, attr)

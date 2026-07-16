@@ -289,6 +289,15 @@ Wrap the MCP **client** inside the host/agent runtime. This is where
 AgentCrash has the richest context: it sees the originating agent turn, the
 prompt that led to the call, and the result the model consumed.
 
+> **Implemented** in `agentcrash/integrations/mcp_client.py`: a
+> dependency-free `MCPClientRecorder` (any client/SDK) and an optional
+> `RecordingClientSession` wrapping `mcp.ClientSession`. Every interaction is
+> funneled through `ctx.call_external(kind="mcp")`, so it inherits exact
+> replay, counterfactuals, the analyzer's disambiguation root-cause, and
+> redaction — with no core changes. `isError: true` is recorded as a returned
+> value (replayed verbatim, not raised); JSON-RPC/transport errors raise and
+> re-raise on replay.
+
 - **What to observe per call**:
   - **Server identity**: `serverInfo` from `initialize` / `server/discover`
     (name, version), negotiated `protocolVersion`, transport type and
