@@ -61,6 +61,9 @@ agentcrash demo
 # Launch the local web UI + API:
 agentcrash start
 # → http://127.0.0.1:8000
+
+# Or expose AgentCrash to any MCP-aware host as a stdio MCP server:
+agentcrash mcp
 ```
 
 The demo runs a customer-support agent that refunds the **wrong customer**
@@ -104,6 +107,27 @@ with tracer.run("my-agent", model="gpt-4o") as run:
 Every `run.tool` / `run.llm` call is captured frozen and is automatically
 replayable. An agent authored against the SDK is replayable as-is — no extra
 wiring.
+
+## Use as an MCP server (let agents debug themselves)
+
+`agentcrash mcp` runs AgentCrash as a **stdio MCP server** — the same engine
+as the web UI, spoken as JSON-RPC 2.0 over stdin/stdout. Any MCP-aware host
+(Claude Desktop, IDEs, coding agents) can search traces, replay failures,
+analyze root causes, and mint regression tests from its own tool loop. No
+extra dependency; reuse in an `mcp` client config:
+
+```json
+{
+  "mcpServers": {
+    "agentcrash": { "command": "agentcrash", "args": ["mcp"] }
+  }
+}
+```
+
+Tools exposed: `trace_search`, `trace_get`, `replay_run`, `analyze_failure`,
+`test_generate`. Tool-execution failures return `isError: true` (not a
+JSON-RPC error), so the host can reason about retry. See
+[`docs/research/mcp.md`](docs/research/mcp.md) §9 for the design.
 
 ## Replay & counterfactuals
 
@@ -170,7 +194,8 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 
 ```
 agentcrash/            # Python package: schema, storage, SDK, replay, diff,
-                       #   analyzer, interventions, chaos, tests_gen, server, CLI
+                       #   analyzer, interventions, chaos, tests_gen, server,
+                       #   mcp_server (stdio MCP), CLI
 apps/web/              # React + TypeScript + Vite web UI
 examples/demo_agent.py # the intentionally-failing demo agent (offline)
 docs/research/         # ecosystem, competitors, integrations, OTel, MCP, …
@@ -185,8 +210,9 @@ research (see `docs/research/integrations.md`):
 
 - **generic Python / TypeScript SDKs** — instrument any agent in-process
 - **OpenTelemetry** — ingest OTel GenAI spans via a compatibility adapter
-- **MCP** — instrument MCP client↔server traffic; expose AgentCrash *as* an MCP
-  server (`trace_get`, `replay_run`, `analyze_failure`, `test_generate`)
+- **MCP** ✅ — AgentCrash runs *as* a stdio MCP server (`agentcrash mcp`):
+  `trace_search`, `trace_get`, `replay_run`, `analyze_failure`,
+  `test_generate`. Client-side instrumentation of MCP traffic is on the roadmap.
 - **OpenAI Agents SDK, Anthropic Claude Agent SDK, LangGraph, PydanticAI,
   smolagents** — via each framework's callback/hook surface
 - **Claude Code, Codex CLI, Aider, OpenHands** — coding-agent actions via
@@ -204,7 +230,8 @@ analyze → test) is real and tested. In progress:
 - **Phase 0** ✅ Ecosystem + architecture research (`docs/research/`)
 - **Phase 1** ✅ Schema, storage, SDK, collector, redaction, server, CLI
 - **Phase 2** ✅ First vertical slice + demo + web UI
-- **Phase 3** 🚧 Universal integration layer (generic SDKs, OTel, MCP ingestion)
+- **Phase 3** 🚧 Universal integration layer — MCP server ✅ shipped; generic
+  SDKs, OTel ingestion, and MCP client-side instrumentation next
 - **Phase 4** 🚧 Major framework + coding-agent integrations
 - **Phase 5** 🚧 Causal analysis v2 (multi-intervention, ranking)
 - **Phase 6** ⏳ Regression test suite + CI runner

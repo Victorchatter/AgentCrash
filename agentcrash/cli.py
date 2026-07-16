@@ -62,6 +62,18 @@ def cmd_start(args) -> None:
                 reload=False, log_level=args.log_level)
 
 
+def cmd_mcp(args) -> None:
+    """Run AgentCrash as a stdio MCP server (tools: trace_search, trace_get,
+    replay_run, analyze_failure, test_generate). Stdin/stdout speak JSON-RPC;
+    keep server logs on stderr so they don't corrupt the protocol stream."""
+    from agentcrash.mcp_server import serve
+    from agentcrash.server import build_server
+
+    app, ctx = build_server(args.db or DEFAULT_DB)
+    _ = app  # web app unneeded for the stdio server; ctx is what we use
+    serve(ctx)
+
+
 def cmd_demo(args) -> None:
     from agentcrash.analyzer import Analyzer
     from agentcrash.replay import ReplayConfig, Replayer
@@ -246,6 +258,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, default=8000)
     s.add_argument("--log-level", default="info")
     s.set_defaults(func=cmd_start)
+
+    m = sub.add_parser("mcp", help="run AgentCrash as a stdio MCP server")
+    m.set_defaults(func=cmd_mcp)
 
     sub.add_parser("demo", help="run the full RECORD→REPLAY→ANALYZE→TEST demo").set_defaults(func=cmd_demo)
     sub.add_parser("status", help="show store summary").set_defaults(func=cmd_status)
