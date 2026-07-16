@@ -162,6 +162,35 @@ value* (replayed verbatim, not raised); JSON-RPC/transport errors raise and are
 re-raised on replay. Tool args are redacted before storage (secrets in
 `call_signature` too).
 
+## Import OpenTelemetry GenAI traces
+
+AgentCrash ingests foreign traces recorded with the OpenTelemetry GenAI
+semantic conventions — so an agent you already instrument with OTel is
+viewable, searchable, and failure-identified through AgentCrash without
+re-instrumenting. Dependency-free: consume any OTLP/JSON span dump (e.g. the
+Collector `file` exporter):
+
+```bash
+agentcrash otel-import traces.json            # one run per OTel trace
+agentcrash otel-import traces.json --project billing
+```
+
+```python
+from agentcrash.integrations.otel import import_bundle
+
+run_ids = import_bundle(storage, bundle)   # dict or JSON string
+```
+
+Each OTel `traceId` becomes one run; `gen_ai.operation.name` maps to the
+canonical event type (`chat`→`llm.response`, `execute_tool`→`tool.completed`
+/`tool.failed`, `retrieval`/`embeddings`→`retrieval.completed`, …), tokens land
+in metadata, and `service.name` → agent. Imported events are **observational**
+— no replay fixture, because the producing agent isn't available (the
+sidecar gap the research notes flag for Phase 5/6). What you get today:
+`trace_search`, `trace_get`, web-UI inspection, and failure-event
+identification. Secrets are redacted at ingest (prompts and tool I/O routinely
+carry PII and keys). See [`docs/research/opentelemetry.md`](docs/research/opentelemetry.md).
+
 ## Replay & counterfactuals
 
 ```python
@@ -242,7 +271,9 @@ the canonical schema. The first integrations planned from the ecosystem
 research (see `docs/research/integrations.md`):
 
 - **generic Python / TypeScript SDKs** — instrument any agent in-process
-- **OpenTelemetry** — ingest OTel GenAI spans via a compatibility adapter
+- **OpenTelemetry** ✅ — ingest OTel GenAI spans (OTLP/JSON) via the
+  compatibility importer (`agentcrash otel-import`,
+  `agentcrash/integrations/otel.py`); one run per trace, redacted at ingest
 - **MCP** ✅ — AgentCrash runs *as* a stdio MCP server (`agentcrash mcp`):
   `trace_search`, `trace_get`, `replay_run`, `analyze_failure`,
   `test_generate`. Client-side instrumentation (`agentcrash/integrations/mcp_client.py`)
@@ -265,7 +296,7 @@ analyze → test) is real and tested. In progress:
 - **Phase 1** ✅ Schema, storage, SDK, collector, redaction, server, CLI
 - **Phase 2** ✅ First vertical slice + demo + web UI
 - **Phase 3** 🚧 Universal integration layer — MCP server ✅ + MCP client-side
-  instrumentation ✅ shipped; generic SDKs and OTel ingestion next
+  instrumentation ✅ + OTel GenAI ingestion ✅ shipped; generic SDKs next
 - **Phase 4** 🚧 Major framework + coding-agent integrations
 - **Phase 5** 🚧 Causal analysis v2 (multi-intervention, ranking)
 - **Phase 6** ⏳ Regression test suite + CI runner

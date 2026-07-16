@@ -223,6 +223,27 @@ def cmd_import(args) -> None:
     print(f"imported run {rid}")
 
 
+def cmd_otel_import(args) -> None:
+    """Import an OTLP/JSON span bundle (``{"resourceSpans": [...]}``) as runs.
+
+    Each OTel trace becomes one AgentCrash run. Imported events are
+    observational (no replay fixture) but searchable, viewable, and
+    failure-identified. Secrets are redacted at ingest.
+    """
+    from agentcrash.integrations.otel import import_bundle
+
+    storage = _storage(args)
+    bundle = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    run_ids = import_bundle(storage, bundle, project=args.project)
+    if not run_ids:
+        print("no traces found in bundle")
+        return
+    for rid in run_ids:
+        run = storage.get_run(rid)
+        print(f"imported run {rid}  status={run['status']}  agent={run.get('agent')}  "
+              f"events={len(storage.get_events(rid))}")
+
+
 def cmd_chaos(args) -> None:
     from agentcrash.chaos import run_chaos
     from agentcrash.replay import Replayer
@@ -303,6 +324,11 @@ def build_parser() -> argparse.ArgumentParser:
     imp = sub.add_parser("import", help="import a run bundle")
     imp.add_argument("file")
     imp.set_defaults(func=cmd_import)
+
+    ot = sub.add_parser("otel-import", help="import an OTLP/JSON span bundle as runs")
+    ot.add_argument("file", help="path to the OTLP/JSON bundle")
+    ot.add_argument("--project", default="otel", help="project name to import into")
+    ot.set_defaults(func=cmd_otel_import)
 
     return p
 

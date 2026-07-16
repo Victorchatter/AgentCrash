@@ -693,6 +693,16 @@ the live trace.
   instrumentations, from `gen_ai.prompt`/`gen_ai.completion` legacy
   attributes (deprecated but still emitted by some libraries).
 
+> **Implemented** (dependency-free) in `agentcrash/integrations/otel.py` +
+> `agentcrash otel-import <file>` CLI. Consumes the OTLP/JSON bundle the
+> collector `file` exporter writes (no `opentelemetry` SDK required).
+> `traceId`→`run_id`, `spanId`→`event_id`, `parentSpanId`→`parent_id`,
+> `gen_ai.operation.name`→event type, `service.name`→agent, tokens→metadata,
+> payloads from span events then attrs (gen_ai.* primary, OpenInference
+> `llm.*` fallback). Imported events are **observational** (`replay=None`) —
+> the §7.4 sidecar gap (replay of foreign traces needs Phase 5/6). Redaction
+> runs at ingest (`redact_event`) since `storage.insert_events` does not.
+
 ### 7.4 Sidecar schema (the parts OTel cannot hold)
 
 All sidecar records are keyed by `(run_id, span_id)` (which are OTel
