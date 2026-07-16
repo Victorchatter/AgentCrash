@@ -134,6 +134,33 @@ def test_unredacted_event_leaves_privacy_clean():
     assert e.privacy.redaction_types == []
 
 
+def test_redaction_preserves_token_counts_but_redacts_secrets():
+    """Count/usage keys contain the "token" fragment but hold quantities, not
+    secrets — they must survive redaction. Real secrets under sibling keys
+    must still scrub. (Regression guard for the OTel "tokens" false-positive.)
+    """
+    secret = "sk-ant-" + "q" * 24
+    e = _ev(output={
+        "tokens": {"input": 42, "output": 7},          # counts -> kept
+        "token_count": 42,                              # count -> kept
+        "usage": {"input": 42},                          # unrelated -> kept
+        "access_token": secret,                          # real secret -> redacted
+        "secrets": [secret],                             # plural of secret -> redacted
+        "passwords": [secret],                           # plural -> redacted
+    })
+    redact_event(e)
+    assert e.output["tokens"] == {"input": 42, "output": 7}
+    assert e.output["token_count"] == 42
+    assert e.output["usage"] == {"input": 42}
+    blob = str(e.output)
+    assert secret not in blob            # no secret leaked
+    assert e.output["access_token"] == "[REDACTED]"
+    # a value under a sensitive key is replaced wholesale with "[REDACTED]"
+    assert e.output["secrets"] == "[REDACTED]"
+    assert e.output["passwords"] == "[REDACTED]"
+    assert e.privacy.redacted is True
+
+
 # ---------- storage ----------
 def test_storage_run_and_events_roundtrip(tmp_storage, demo):
     from agentcrash.sdk import CrashTracer

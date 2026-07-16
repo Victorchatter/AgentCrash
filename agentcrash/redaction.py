@@ -63,6 +63,18 @@ def _is_sensitive_key(key: Any) -> bool:
     if not isinstance(key, str):
         return False
     kn = key.lower().replace("-", "_")
+    # Count/usage keys contain a sensitive fragment ("token") but hold a
+    # quantity, not the secret — substring matching would scrub them and lose
+    # the counts (the OTel importer hit this with a "tokens" key). We use an
+    # explicit allowlist of count/usage forms rather than word-bounding the
+    # fragments, because word-bounding "token"/"secret"/"password" would also
+    # stop redacting their plurals ("secrets", "passwords", "keys"), which ARE
+    # secrets. Add a key here only when its value is provably not a secret.
+    # ponytail: explicit allowlist; extend when a new count key surfaces.
+    if kn.endswith(("_count", "_counts", "_usage", "_usages")):
+        return False
+    if kn in {"tokens", "token_usage"}:
+        return False
     return any(frag in kn for frag in _SENSITIVE_KEY_FRAGMENTS)
 
 
