@@ -162,6 +162,31 @@ value* (replayed verbatim, not raised); JSON-RPC/transport errors raise and are
 re-raised on replay. Tool args are redacted before storage (secrets in
 `call_signature` too).
 
+## Instrument a LangChain / LangGraph agent
+
+LangChain and LangGraph share the callback system, so one duck-typed handler
+records both — and it does **not** require `langchain_core` installed (LangChain
+dispatches callbacks by method name). Pass it as a callback to any Runnable or
+graph:
+
+```python
+from agentcrash.sdk import CrashTracer
+from agentcrash.integrations.langchain import AgentCrashCallbackHandler
+
+tracer = CrashTracer(integration="langchain", framework="langchain")
+with tracer.run("my-agent", model="gpt-4o") as run:
+    handler = AgentCrashCallbackHandler(run)
+    chain.invoke(inputs, config={"callbacks": [handler]})
+```
+
+`on_chat_model_*`→`llm.response`, `on_tool_*`→`tool.completed`/`tool.failed`,
+`on_chain_*`→`agent.decision`, `on_retriever_*`→`retrieval.completed`. Events
+are **observational** (no replay fixture — callbacks fire around execution the
+framework already did, so there's no `fn` to wrap on the replay rail): you get
+`trace_search`, `trace_get`, the web UI, and failure-event identification,
+redacted at record time. Replay/counterfactuals for a LangChain run need the
+LLM-wrapper variant (a recording `BaseChatModel`), a later surface.
+
 ## Import OpenTelemetry GenAI traces
 
 AgentCrash ingests foreign traces recorded with the OpenTelemetry GenAI
@@ -278,6 +303,10 @@ research (see `docs/research/integrations.md`):
   `trace_search`, `trace_get`, `replay_run`, `analyze_failure`,
   `test_generate`. Client-side instrumentation (`agentcrash/integrations/mcp_client.py`)
   records agent→server MCP traffic into the canonical schema, replayable as-is.
+- **LangChain / LangGraph** ✅ — one duck-typed callback handler
+  (`agentcrash/integrations/langchain.py`) records both, no `langchain_core`
+  dependency; observational events (search/view/failure-event), redacted at
+  record time.
 - **OpenAI Agents SDK, Anthropic Claude Agent SDK, LangGraph, PydanticAI,
   smolagents** — via each framework's callback/hook surface
 - **Claude Code, Codex CLI, Aider, OpenHands** — coding-agent actions via
@@ -297,7 +326,8 @@ analyze → test) is real and tested. In progress:
 - **Phase 2** ✅ First vertical slice + demo + web UI
 - **Phase 3** 🚧 Universal integration layer — MCP server ✅ + MCP client-side
   instrumentation ✅ + OTel GenAI ingestion ✅ shipped; generic SDKs next
-- **Phase 4** 🚧 Major framework + coding-agent integrations
+- **Phase 4** 🚧 Major framework + coding-agent integrations — LangChain/LangGraph
+  callback adapter ✅ shipped; OpenAI Agents SDK, Anthropic SDK, PydanticAI next
 - **Phase 5** 🚧 Causal analysis v2 (multi-intervention, ranking)
 - **Phase 6** ⏳ Regression test suite + CI runner
 - **Phase 7** ⏳ Chaos engine v2 (reliability scoring across fault classes)

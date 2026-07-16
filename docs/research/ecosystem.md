@@ -55,7 +55,7 @@ Nearly every modern framework and coding agent now converges on the **OTel GenAI
 - **Structured events:** Yes — callback events with `run_id`/`parent_run_id` reconstructing span trees.
 - **OTel:** `openinference-instrumentation-langchain` (Arize, stable, broad) or official `opentelemetry-instrumentation-langchain` (migrating to `opentelemetry-python-genai`, PR #4449 closed May 2026 in favor of new repo). PR added `invoke_workflow`/`invoke_agent` span classification.
 - **Stability:** Medium. Callback API is mature but being layered under OTel; the OTel instrumentation is mid-migration. GenAI semconv still Development status.
-- **AgentCrash hook:** OTel auto-instrumentor is the lowest-friction path; callback handlers for custom logic.
+- **AgentCrash hook:** OTel auto-instrumentor is the lowest-friction path; callback handlers for custom logic. **Implemented** (dependency-free, duck-typed — no `langchain_core` required): `agentcrash/integrations/langchain.py` `AgentCrashCallbackHandler` records both LangChain and LangGraph via the shared callback system; observational events (`replay=None`), redacted at record time. Replay needs the LLM-wrapper variant (future).
 
 ### A5. CrewAI (Python)
 - **Language:** Python.
