@@ -43,6 +43,9 @@ class Candidate:
     score: float = 0.0
     evidence: list[Evidence] = field(default_factory=list)
     averted: bool = False
+    # v2: structured per-singleton disambiguation results, for combination
+    # probing. Each entry: {index, item, averted, fixture_key}.
+    singleton_results: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -56,6 +59,10 @@ class FailureReport:
     recommended_fix: str | None = None
     suggested_invariant: dict[str, Any] | None = None
     summary: list[str] = field(default_factory=list)
+    # v2: a multi-root failure — no single candidate averts, but a combination
+    # of interventions across >=2 candidates does.
+    multi_root: bool = False
+    root_events: list[str] = field(default_factory=list)
 
 
 # ponytail: side-effecting tool names recognized for fix suggestions.
@@ -109,6 +116,7 @@ class Analyzer:
             report.candidates.append(cand)
 
         report.candidates.sort(key=lambda c: c.score, reverse=True)
+        self._probe_combinations(report, run_id, agent_fn, original_input)
         self._synthesize(report, events)
         return report
 
@@ -139,6 +147,8 @@ class Analyzer:
             cand.evidence.append(Evidence(
                 description=f"Replay with only {ce.name}#{i} ({_short(item)}) -> {result.status}",
                 event_id=ce.id, averted=averted, replay_run_id=result.new_run_id))
+            cand.singleton_results.append(
+                {"index": i, "item": item, "averted": averted, "fixture_key": target_key})
             if averted:
                 averted_any = True
                 cand.averted = True
@@ -165,11 +175,106 @@ class Analyzer:
             description=f"Replay with {ce.name} forced to fail -> {result.status} (averted={averted})",
             event_id=ce.id, averted=averted, replay_run_id=result.new_run_id))
 
+    def _probe_combinations(self, report: FailureReport, run_id: str,
+                            agent_fn: Callable[[Any, Any], Any], original_input: Any) -> None:
+        """v2: detect multi-root failures.
+
+        If no single candidate averts the failure, try bounded combinations of
+        disambiguation singletons across >=2 list-output candidates. If a
+        combination averts where every single candidate did not, the failure is
+        multi-root (fixing any one call alone is insufficient). Bounded: only
+        when 2-4 list candidates exist and the Cartesian product is <= 16 replays.
+        Skipped entirely when any single candidate already averted (single-root
+        case, e.g. the demo) — so this changes nothing for the common path.
+        """
+        import itertools
+
+        from agentcrash.replay import ReplayConfig
+
+        if any(c.averted for c in report.candidates):
+            return
+        list_cands = [c for c in report.candidates if len(c.singleton_results) >= 2]
+        if len(list_cands) < 2:
+            return
+        if len(list_cands) > 4:
+            list_cands = list_cands[:4]
+        product = 1
+        for c in list_cands:
+            product *= len(c.singleton_results)
+        if product > 16:
+            return  # ponytail: bounded; a real system samples or ranks here.
+        for combo in itertools.product(*[c.singleton_results for c in list_cands]):
+            interventions = [
+                Intervention(id=f"cf-combo-{i}", type="replace_tool_response",
+                             fixture_key=sr["fixture_key"], spec={"response": [sr["item"]]})
+                for i, sr in enumerate(combo)
+            ]
+            try:
+                result = self.replayer.replay(
+                    run_id, agent_fn, original_input,
+                    ReplayConfig(mode="selective", interventions=interventions),
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            if result.status == "completed":
+                report.multi_root = True
+                report.root_events = [c.event_id for c in list_cands]
+                names = " and ".join(c.name for c in list_cands)
+                ev_ids = ", ".join(report.root_events)
+                report.evidence.append(Evidence(
+                    description=f"Replay fixing both {names} ({ev_ids}) -> completed",
+                    event_id=None, averted=True, replay_run_id=result.new_run_id))
+                # record the non-averting singletons as reproducing evidence
+                for c in list_cands:
+                    for sr in c.singleton_results:
+                        if not sr["averted"]:
+                            report.evidence.append(Evidence(
+                                description=f"Replay fixing only {c.name}#{sr['index']} -> failed",
+                                event_id=c.event_id, averted=False))
+                return
+
     def _synthesize(self, report: FailureReport, events: list[AgentCrashEvent]) -> None:
         if not report.candidates:
             report.root_cause = "No replayable candidate causes identified; failure may be in orchestration or environment."
             report.confidence = 0.2
             report.summary.append(report.root_cause)
+            return
+
+        if report.multi_root:
+            names = ", ".join(
+                next((e.name for e in events if e.id == eid), eid) for eid in report.root_events
+            )
+            report.root_cause = (
+                f"Multi-root failure: the failure requires disambiguating more than one call "
+                f"({names}; events {', '.join(report.root_events)}). Fixing any single call "
+                f"alone does not avert it; fixing all of them does."
+            )
+            report.confidence = 0.82
+            side_effects = [e.name for e in events if e.type == EventType.TOOL_CALLED.value
+                            and _is_side_effect(e.name or "")]
+            target = side_effects[0] if side_effects else "the side-effecting action"
+            report.recommended_fix = (
+                f"Require explicit identity/record resolution for each ambiguous call "
+                f"({names}) before performing {target}."
+            )
+            report.suggested_invariant = {
+                "type": "action_requires_preceding_multi",
+                "action": target,
+                "preceding": report.root_events,
+                "reason": "multi-root ambiguous selection caused the failure",
+            }
+            report.summary = [
+                f"ROOT CAUSE ANALYSIS — run {report.run_id}",
+                "",
+                f"Most likely cause: {report.root_cause}",
+                f"Confidence: {int(report.confidence * 100)}%",
+                "",
+                "Evidence:",
+            ]
+            for ev in report.evidence[:8]:
+                mark = "✅ averts" if ev.averted else "❌ reproduces"
+                report.summary.append(f"  - [{mark}] {ev.description}")
+            report.summary += ["", f"Recommended fix: {report.recommended_fix}"]
             return
 
         top = report.candidates[0]
